@@ -55,6 +55,28 @@ def handle_motor_relays_position_module_status(
     if did_change:
         yield MqttMessage(f"motor/{motor}/position", f"{position}")
 
+        # Position 0/100 überschreibt den Bewegungsstatus
+        if position == 100:
+            state = MotorState.OPEN
+        elif position == 0:
+            state = MotorState.CLOSED
+        else:
+            state = None
+
+        if state is not None:
+            changed = motor_obj.update_state(state)
+            if changed:
+                yield MqttMessage(f"motor/{motor}/state", state.value)
+
+            if (
+                motor == 4
+                and module.motor_outputs.positioning_mode
+                == lcn_defs.MotorPositioningMode.MODULE
+            ):
+                changed = module.motor_outputs.update_state(state)
+                if changed:
+                    yield MqttMessage("motor/outputs/state", state.value)
+
 
 @input_handler(inputs.ModStatusMotorPositionBS4)
 def handle_motor_position_module_bs4(
