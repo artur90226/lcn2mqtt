@@ -152,7 +152,7 @@ def handle_motor_outputs_status(
 
     if motor_obj.positioning_mode == lcn_defs.MotorPositioningMode.MODULE:
         if inp.get_percent() != 0:
-            return  # still moving, state is handled by position status inputs
+            return  # still moving, direction is handled by position status inputs
         # motor stopped: derive final state from actual position, not last direction
         if motor_obj.position is not None and motor_obj.position > 0:
             state = MotorState.OPEN
@@ -192,7 +192,8 @@ def handle_motor_outputs_position_module_status(
     inp: inputs.ModStatusMotorPositionModule, module: Device
 ) -> Generator[MqttMessage]:
     """Handle a motor position status input, update the module state, and publish any changes."""
-    if module.motor_outputs.positioning_mode != lcn_defs.MotorPositioningMode.MODULE:
+    motor_obj = module.motor_outputs
+    if motor_obj.positioning_mode != lcn_defs.MotorPositioningMode.MODULE:
         return
 
     motor = inp.motor + 1
@@ -201,9 +202,22 @@ def handle_motor_outputs_position_module_status(
     if motor != 4:
         return  # only handle motor 4 for outputs
 
-    did_change = module.motor_outputs.update_position(position)
+    old_position = motor_obj.position
+
+    did_change = motor_obj.update_position(position)
     if did_change:
         yield MqttMessage("motor/outputs/position", f"{position}")
+
+    if old_position is not None and position > old_position:
+        state = MotorState.OPENING
+    elif old_position is not None and position < old_position:
+        state = MotorState.CLOSING
+    else:
+        return  # no direction info yet (first event) or no movement
+
+    changed = motor_obj.update_state(state)
+    if changed:
+        yield MqttMessage("motor/outputs/state", state.value)
 
 
 @mqtt_handler("motor/outputs/set", "motor/outputs/set_position")
