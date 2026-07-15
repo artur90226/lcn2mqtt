@@ -178,6 +178,7 @@ class MotorOutput(Motor):
         | None
     ) = lcn_defs.MotorPositioningMode.NONE
     target_position: MotorValue = None
+    at_target: bool = False
 
     @field_validator("reverse_time", mode="before")
     @classmethod
