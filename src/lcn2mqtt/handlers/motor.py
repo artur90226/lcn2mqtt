@@ -18,6 +18,8 @@ _LOG = logging.getLogger(__name__)
 
 Publish = Callable[[str, Any], Awaitable[None]]
 
+_MOTOR_RUNNING_THRESHOLD = 90  # percent; below this, the module has started ramping down -> stopped
+
 
 # ---------- Motors via relays ----------
 
@@ -149,13 +151,23 @@ def handle_motor_outputs_status(
 ) -> Generator[MqttMessage]:
     """Handle a motor output status input, update the module state, and publish any changes."""
     motor_obj = module.motor_outputs
+    percent = inp.get_percent()
 
     if motor_obj.positioning_mode == lcn_defs.MotorPositioningMode.MODULE:
-        # final state is resolved directly from position/set events, not from
-        # the (possibly dimmed/delayed) output percentage
+        if percent >= _MOTOR_RUNNING_THRESHOLD:
+            return  # still actively running, direction is handled by position status inputs
+        # output has dropped below the running threshold -> motor has stopped
+        # (relay opened), even though the value itself is still ramping down
+        # over the reverse_time. No need to wait for it to reach exactly 0.
+        if motor_obj.position is not None:
+            state = MotorState.OPEN if motor_obj.position > 0 else MotorState.CLOSED
+            changed = motor_obj.update_state(state)
+            if changed:
+                yield MqttMessage("motor/outputs/state", state.value)
         return
 
-    if inp.get_percent() > 0:  # motor is on
+    # No positioning mode: We can only assume the motor state based on the module's outputs state.
+    if percent >= _MOTOR_RUNNING_THRESHOLD:  # motor is on
         if inp.get_output_id() == lcn_defs.OutputPort.OUTPUTUP.value:
             state = MotorState.OPENING
         elif inp.get_output_id() == lcn_defs.OutputPort.OUTPUTDOWN.value:
