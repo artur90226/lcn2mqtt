@@ -229,7 +229,9 @@ def handle_motor_outputs_position_module_status(
             yield MqttMessage("motor/outputs/state", state.value)
         return
 
-    motor_obj.at_target = False
+    if motor_obj.at_target:
+        return  # already resolved as stopped; a small jitter in position shouldn't flip direction
+
     if old_position is not None and position > old_position:
         state = MotorState.OPENING
     elif old_position is not None and position < old_position:
