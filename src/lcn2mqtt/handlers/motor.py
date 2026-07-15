@@ -214,20 +214,22 @@ def handle_motor_outputs_position_module_status(
     if did_change:
         yield MqttMessage("motor/outputs/position", f"{position}")
 
+    if not did_change:
+        return  # duplicate/stale event, no actual movement -> nothing to resolve
+
     target = motor_obj.target_position
     reached_target = target is not None and position == target
-    reached_endstop = position in (0, 100) and target is None
+    reached_endstop = position in (0, 100)
 
     if reached_target or reached_endstop:
+        motor_obj.at_target = True
         state = MotorState.OPEN if position > 0 else MotorState.CLOSED
         changed = motor_obj.update_state(state)
         if changed:
             yield MqttMessage("motor/outputs/state", state.value)
         return
 
-    if motor_obj.at_target:
-        return  # already resolved as stopped via output status; ignore stale/noisy direction data
-
+    motor_obj.at_target = False
     if old_position is not None and position > old_position:
         state = MotorState.OPENING
     elif old_position is not None and position < old_position:
