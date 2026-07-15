@@ -155,10 +155,11 @@ def handle_motor_outputs_status(
 
     if motor_obj.positioning_mode == lcn_defs.MotorPositioningMode.MODULE:
         if percent >= _MOTOR_RUNNING_THRESHOLD:
-            return  # still actively running, direction is handled by position status inputs
+            motor_obj.at_target = False  # actively running again
+            return  # direction is handled by position status inputs
         # output has dropped below the running threshold -> motor has stopped
-        # (relay opened), even though the value itself is still ramping down
-        # over the reverse_time. No need to wait for it to reach exactly 0.
+        # (even though the value itself is still ramping down over reverse_time)
+        motor_obj.at_target = True
         if motor_obj.position is not None:
             state = MotorState.OPEN if motor_obj.position > 0 else MotorState.CLOSED
             changed = motor_obj.update_state(state)
@@ -224,6 +225,9 @@ def handle_motor_outputs_position_module_status(
             yield MqttMessage("motor/outputs/state", state.value)
         return
 
+    if motor_obj.at_target:
+        return  # already resolved as stopped via output status; ignore stale/noisy direction data
+
     if old_position is not None and position > old_position:
         state = MotorState.OPENING
     elif old_position is not None and position < old_position:
@@ -261,6 +265,7 @@ async def handle_motor_outputs_set(
                 lcn_defs.MotorStateModifier.STOP, motor_obj.reverse_time
             )
             motor_obj.target_position = motor_obj.position
+            motor_obj.at_target = True
             if motor_obj.position is not None:
                 state = (
                     MotorState.OPEN if motor_obj.position > 0 else MotorState.CLOSED
@@ -279,6 +284,7 @@ async def handle_motor_outputs_set(
         if modifier is None:
             return
         motor_obj.target_position = None
+        motor_obj.at_target = False
         await device_connection.control_motor_outputs(
             modifier, motor_obj.reverse_time
         )
@@ -294,6 +300,7 @@ async def handle_motor_outputs_set(
         except ValueError as exc:
             raise ValueError(f"Invalid position payload: {payload}") from exc
         motor_obj.target_position = position
+        motor_obj.at_target = False
         await device_connection.control_motor_outputs_position(
             position, positioning_mode
         )
